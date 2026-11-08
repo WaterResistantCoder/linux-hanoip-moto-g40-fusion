@@ -1,0 +1,102 @@
+#!/bin/busybox sh
+# hanoip bring-up initramfs: find the postmarketOS rootfs on UFS LUN 1
+# (/dev/sdb24), bring up a USB CDC-ECM gadget for an interactive channel, and
+# switch_root into it.
+#
+# The kernel is built with this initramfs embedded (CONFIG_INITRAMFS_SOURCE),
+# so root= on the cmdline is ignored; we mount it ourselves here. If the mount
+# fails we drop to a shell so the panel shows why.
+/bin/busybox mount -t proc none /proc
+/bin/busybox mount -t sysfs none /sys
+/bin/busybox mount -t devtmpfs none /dev 2>/dev/null
+
+# Attach stdio to the panel console now that /dev exists.
+exec </dev/console >/dev/console 2>&1
+
+echo
+echo "================ hanoip ================"
+echo " mainline initramfs up; looking for the rootfs on UFS"
+echo "========================================"
+
+# Wait for the UFS LUN 1 userdata partition to appear (the driver is built in,
+# so this is usually instant, but be generous on a cold boot).
+i=0
+while [ ! -b /dev/sdb24 ] && [ $i -lt 120 ]; do
+	/bin/busybox sleep 0.5
+	i=$((i + 1))
+done
+
+if [ ! -b /dev/sdb24 ]; then
+	echo "ERROR: /dev/sdb24 never appeared"
+	exec /bin/busybox sh
+fi
+
+# Clean the rootfs before mounting: it can carry errors from unclean shutdowns,
+# and a clean fs is required for online resizing later.
+echo "hanoip: e2fsck /dev/sdb24"
+/sbin/e2fsck -fy /dev/sdb24 2>&1 | /bin/busybox tail -n 5
+
+/bin/busybox mkdir -p /newroot
+if ! /bin/busybox mount -t ext4 -o rw /dev/sdb24 /newroot; then
+	echo "ERROR: could not mount /dev/sdb24 as ext4"
+	exec /bin/busybox sh
+fi
+
+# --- USB CDC-ECM gadget, set up early so we get a network channel -----------
+# (macOS speaks CDC-ECM natively; device is 172.16.42.1, host 172.16.42.2.)
+/bin/busybox mount -t configfs none /sys/kernel/config 2>/dev/null
+if [ -d /sys/kernel/config/usb_gadget ]; then
+	G=/sys/kernel/config/usb_gadget/g1
+	/bin/busybox mkdir -p $G
+	echo 0x18d1 > $G/idVendor
+	echo 0xd001 > $G/idProduct
+	/bin/busybox mkdir -p $G/strings/0x409
+	echo "Motorola" > $G/strings/0x409/manufacturer
+	echo "hanoip" > $G/strings/0x409/serialnumber
+	echo "Moto G40 Fusion (postmarketOS)" > $G/strings/0x409/product
+	/bin/busybox mkdir -p $G/functions/ecm.usb0
+	/bin/busybox mkdir -p $G/functions/acm.usb0
+	/bin/busybox mkdir -p $G/configs/c.1/strings/0x409
+	echo "ECM + ACM" > $G/configs/c.1/strings/0x409/configuration
+	/bin/busybox ln -sf $G/functions/ecm.usb0 $G/configs/c.1/ 2>/dev/null
+	/bin/busybox ln -sf $G/functions/acm.usb0 $G/configs/c.1/ 2>/dev/null
+	UDC=$(ls /sys/class/udc 2>/dev/null)
+	echo "hanoip: USB UDC = [$UDC]"
+	if [ -n "$UDC" ]; then
+		echo "$UDC" > $G/UDC
+		i=0
+		while [ ! -e /sys/class/net/usb0 ] && [ $i -lt 50 ]; do
+			/bin/busybox sleep 0.1; i=$((i + 1))
+		done
+		/bin/busybox ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null
+		echo "hanoip: usb0 = $(/bin/busybox ifconfig usb0 2>/dev/null | head -1)"
+	fi
+else
+	echo "hanoip: no configfs usb_gadget directory"
+fi
+
+# --- fallback shell over the network (busybox telnetd on usb0) --------------
+# Gives a rootfs shell even if the rootfs' own services misbehave. devpts must
+# exist so telnetd can allocate a pty.
+/bin/busybox mkdir -p /dev/pts
+/bin/busybox mount -t devpts none /dev/pts 2>/dev/null
+/bin/busybox telnetd -p 23 -l /bin/sh 2>/dev/null && \
+	echo "hanoip: telnetd fallback listening on 172.16.42.1:23"
+
+# --- diagnostics, read back from TWRP at /root/hanoip-usb.txt ---------------
+{
+	echo "=== hanoip USB diagnostics ==="
+	echo "--- /sys/class/udc ---"
+	ls -l /sys/class/udc 2>&1
+	echo "--- dwc3 platform driver ---"
+	ls -l /sys/bus/platform/drivers/dwc3/ 2>&1
+	echo "--- dmesg (usb|dwc3|phy|typec|role|udc|regulator) ---"
+	dmesg | grep -iE "usb|dwc3|qusb|phy|typec|role|extcon|udc|regulator"
+} > /newroot/root/hanoip-usb.txt 2>&1
+
+echo "rootfs mounted; switching to postmarketOS..."
+/bin/busybox mount --move /proc /newroot/proc
+/bin/busybox mount --move /sys  /newroot/sys
+/bin/busybox mount --move /dev  /newroot/dev
+
+exec /bin/busybox switch_root /newroot /sbin/init

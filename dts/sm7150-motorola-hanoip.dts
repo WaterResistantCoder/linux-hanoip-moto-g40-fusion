@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Motorola Moto G40 Fusion / G60 (hanoip)
+ *
+ * SM7150-AC, 4 GB, UFS 2.1 (userdata on LUN 1),
+ * Ilitek ILI7807S 1080x2460 DSI panel, Ilitek ILI7807 TDDI touch on GENI SE6.
+ */
+
+/dts-v1/;
+
+#include "sm7150-motorola-common.dtsi"
+
+/ {
+	model = "Motorola Moto G40 Fusion";
+	compatible = "motorola,hanoip", "qcom,sm7150";
+
+	qcom,board-id = <0x4c 0xb200>;
+};
+
+/*
+ * Display subsystem: DPU + DSI0 + DSI PHY with the Ilitek ILI7807S (TM)
+ * 1080x2460 video-mode DSC panel. This replaces the bootloader's
+ * simple-framebuffer. mdss now claims the display clocks, so the dispcc
+ * disable hack from bring-up is no longer needed.
+ */
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	vdda-supply = <&vdda_mipi_dsi0_1p2>;
+	status = "okay";
+
+	panel@0 {
+		compatible = "tm,ili7807s-678";
+		reg = <0>;
+
+		vddio-supply = <&vreg_l13a_1p8>;
+
+		reset-gpios = <&pm6150l_gpios 9 GPIO_ACTIVE_LOW>;
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&mdss_dsi0_out>;
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&panel_in>;
+	status = "okay";
+};
+
+&mdss_dsi0_phy {
+	vdds-supply = <&vdda_mipi_dsi0_pll>;
+	status = "okay";
+};
+
+/*
+ * We boot with a DTB built into the kernel, so the boot image cmdline is
+ * ignored and these bootargs are what the kernel actually uses. Add tty0 so
+ * the kernel log is routed to the VT/fbcon on the panel as well as the UART.
+ */
+&{/chosen} {
+	/*
+	 * clk_ignore_unused: keep the bootloader's display clocks alive.
+	 * Nothing claims the DSI/DPU clocks (mdss is disabled), so the kernel's
+	 * clk_disable_unused would gate them and blank the panel.
+	 */
+	bootargs = "console=tty0 console=ttyMSM0,115200 earlycon root=/dev/sdb24 rootfstype=ext4 rootwait rw clk_ignore_unused pd_ignore_unused";
+};
+
+/*
+ * The shared sm7150.dtsi leaves the memory size for the bootloader to fill in
+ * ("We expect the bootloader to fill in the size"). We boot with a DTB built
+ * into the kernel (ABL's tree is ignored), so ABL never patches it and the
+ * kernel would see zero RAM. hanoip has 4 GB: 0x80000000 + 0xfdd00000.
+ */
+&{/memory@80000000} {
+	reg = <0x0 0x80000000 0x0 0xfdd00000>;
+};
+
+/*
+ * hanoip's TrustZone / "removed" carve-out is larger than the shared sm7150
+ * value (0x4100000 vs 0x2d00000). If left unmapped, map_mem() maps the extra
+ * 20 MB (0x88f00000-0x8a300000) as Normal-cacheable and the Qualcomm XPU
+ * faults on speculative reads.
+ */
+&tz_mem {
+	reg = <0x0 0x86200000 0x0 0x4100000>;
+};
+
+&gpu {
+	zap-shader {
+		firmware-name = "qcom/sm7150/motorola/hanoip/a615_zap.mdt";
+	};
+};
+
+&ipa {
+	firmware-name = "qcom/sm7150/motorola/hanoip/ipa_fws.mbn";
+};
+
+&remoteproc_adsp {
+	firmware-name = "qcom/sm7150/motorola/hanoip/adsp.mbn";
+};
+
+&remoteproc_cdsp {
+	firmware-name = "qcom/sm7150/motorola/hanoip/cdsp.mbn";
+};
+
+&remoteproc_mpss {
+	firmware-name = "qcom/sm7150/motorola/hanoip/modem.mbn";
+};
+
+&venus {
+	firmware-name = "qcom/sm7150/motorola/hanoip/venus.mbn";
+};
+
+/*
+ * Ilitek ILI7807 TDDI touch: GENI SE6 (spi6 @ 0xa80000), qup10 on gpio59-62.
+ * reset = TLMM gpio8, IRQ = TLMM gpio9, I/O rail = pm6150 l13 (VDDI).
+ *
+ * The ported vendor driver (drivers/input/touchscreen/ilitek-ipio) binds to
+ * "tchip,ilitek" and takes the reset/irq lines as gpiods, so the properties
+ * are the -gpios form. The vendor supplies are not modelled yet (the driver's
+ * REGULATOR_POWER_ON path is off), so the rail is assumed left on by ABL.
+ */
+&spi6 {
+	status = "okay";
+
+	pinctrl-names = "default";
+	/*
+	 * CS is driven as a GPIO (cs-gpios below), so gpio62 must be muxed to
+	 * function "gpio" (qup_spi6_cs_gpio), not to the qup10 CS function.
+	 * Using qup_spi6_cs here makes the controller claim gpio62 and the
+	 * cs-gpios request then fails, taking the whole SPI probe down (-EINVAL).
+	 */
+	pinctrl-0 = <&qup_spi6_spi>, <&qup_spi6_cs_gpio>;
+
+	cs-gpios = <&tlmm 62 GPIO_ACTIVE_LOW>;
+
+	touchscreen@0 {
+		compatible = "tchip,ilitek";
+		reg = <0>;
+
+		spi-max-frequency = <0xb71b00>;
+
+		reset-gpios = <&tlmm 8 GPIO_ACTIVE_HIGH>;
+		irq-gpios = <&tlmm 9 GPIO_ACTIVE_HIGH>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <9 IRQ_TYPE_EDGE_FALLING>;
+
+		vio-supply = <&vreg_l13a_1p8>;
+
+		status = "okay";
+	};
+};

@@ -1,0 +1,19 @@
+#!/bin/busybox sh
+# hanoip bring-up initramfs (minimal, stays alive).
+/bin/busybox mount -t proc none /proc
+/bin/busybox mount -t sysfs none /sys
+/bin/busybox mount -t devtmpfs none /dev 2>/dev/null
+
+# Attach stdio to the console now that /dev exists.
+exec </dev/console >/dev/console 2>&1
+
+echo
+echo "================ hanoip ================"
+echo " mainline initramfs is up (PID 1)"
+echo "========================================"
+/bin/busybox dmesg | /bin/busybox tail -n 30
+
+# Keep PID 1 alive so the kernel does not panic ("Attempted to kill init").
+while :; do
+	/bin/busybox sleep 3600
+done

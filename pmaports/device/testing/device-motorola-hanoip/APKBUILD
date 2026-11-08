@@ -1,0 +1,31 @@
+# Maintainer: Ravi <ravishiva1999@gmail.com>
+# Reference: <https://postmarketos.org/devicepkg>
+
+pkgname=device-motorola-hanoip
+pkgdesc="Motorola Moto G40 Fusion / G60"
+pkgver=0.1
+pkgrel=0
+url="https://postmarketos.org"
+license="MIT"
+arch="aarch64"
+options="!check !archcheck"
+depends="
+	linux-postmarketos-qcom-sm7150
+	postmarketos-base
+"
+makedepends="devicepkg-dev"
+source="
+	deviceinfo
+"
+
+build() {
+	devicepkg_build $startdir $pkgname
+}
+
+package() {
+	devicepkg_package $startdir $pkgname
+}
+
+sha512sums="
+SKIP  deviceinfo
+"

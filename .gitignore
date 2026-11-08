@@ -1,0 +1,4 @@
+out/
+*.img
+*.img.xz
+*.dtb
