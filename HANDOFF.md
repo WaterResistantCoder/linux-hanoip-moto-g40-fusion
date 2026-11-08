@@ -573,9 +573,11 @@ dts/sm7150-motorola-hanoip.dts    # hanoip: memory size, tz override, bootargs, 
 dts/panel-tm-ili7807s-678.c       # ILI7807S panel driver
 scripts/                          # setup/build/mkbootimg/flash/update-boot/dev-console/host-usb-net + kernel-patches/
 hw/                               # captured stock DTS/dmesg/partitions/iomem
-out/                              # built boot images (see "Where it stands now")
 pmaports/, panel-gen/             # earlier experiments
 ```
+
+(`out/` — the built boot images — is **not** in this repo; it's gitignored. Rebuild them with
+`scripts/build-kernel.sh` + `mkbootimg`.)
 
 ## Device facts (verified)
 
@@ -602,23 +604,6 @@ The kernel tree lives in the Docker volume `hanoip-kernel` (`/kernel`). Applied 
   once the console works (each paints the top band a colour; see the checkpoint script comments).
 - `reset-kernel-init.py` — **reverted** (it rebooted the phone at `kernel_init`).
 
-A clean state is: fresh tree + `force-builtin-dtb.py` only.
+A clean state is: fresh tree + `force-builtin-dtb.py` only, plus the WiFi changes (the
+`&wifi` clocks in the DTS, the ath10k power-on patch, and the WiFi Kconfig flags).
 
-## Files
-
-```
-dts/sm7150-motorola-common.dtsi   # SM7150 board common (trimmed from sm7150-xiaomi-common.dtsi)
-dts/sm7150-motorola-hanoip.dts    # hanoip: memory size, tz override, bootargs, touch node
-scripts/                          # setup/build/mkbootimg/flash + kernel-patches/
-out/                              # built images (boot-hanoip-current.img is the latest clean one)
-hw/                               # captured stock DTS/dmesg/partitions/iomem
-PORT-NOTES.md                     # earlier working notes
-```
-
-## Device facts (verified)
-
-- SM7150-AC, 4 GB, UFS 2.1, `userdata` on **LUN 1** (`/dev/sdb`, 4096-byte blocks).
-- Panel **Ilitek ILI7807S** 1080×2460 (DSC video); splash framebuffer at **`0x9c000000`**.
-- Touch **Ilitek ILI7807 TDDI** on **GENI SE6** (`spi6 @ 0xa80000`), qup10 on gpio59-62,
-  reset `tlmm8`, IRQ `tlmm9`. No mainline SPI/TDDI driver yet.
-- ABL: `fastboot boot` works, header v3, `fastboot flash userdata` refused by design.
